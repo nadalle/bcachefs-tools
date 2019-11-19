@@ -13,7 +13,7 @@ def test_help():
     assert len(ret.stderr) == 0
 
 def test_format(tmpdir):
-    dev = util.device_1g(tmpdir)
+    dev = util.device(tmpdir, 'dev', 1024**3)
     ret = util.run_bch('format', dev, valgrind=True)
 
     assert ret.returncode == 0

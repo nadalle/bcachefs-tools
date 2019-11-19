@@ -2,8 +2,10 @@
 #
 # Tests of the fuse mount functionality.
 
+import errno
 import pytest
 import os
+import random
 import util
 
 pytestmark = pytest.mark.skipif(
@@ -256,3 +258,57 @@ def test_write(bfuse):
     assert ts.contains(post_st.st_mtime)
 
     assert path.read_bytes() == b'test'
+
+# This test emulates generic/416 in the xfstests suite
+def test_fill_4k_files(bfuse_16m):
+    bf = bfuse_16m
+    bf.mount()
+
+    # Fill filesystem with 4k files
+    files = set()
+    i = 0
+    while True:
+        path = bf.mnt / "file{}".format(i)
+
+        #print("Writing to file {}".format(path))
+        try:
+            path.write_bytes(util.random_bytes(4096))
+        except OSError as e:
+            if e.errno == errno.ENOSPC:
+                break
+            raise
+
+        files.add(path)
+        i += 1
+
+    print("Wrote {} files.".format(len(files)))
+
+    # Remount filesystem.
+    bf.unmount()
+    bf.mount()
+
+    # Delete every other file
+    deleted = set()
+    i = 0
+    for path in files:
+        if i % 2 == 0:
+            path.unlink()
+            deleted.add(path)
+
+        i += 1
+
+    files -= deleted
+
+    print("Deleted {} files.".format(len(deleted)))
+
+    # From generic/416, "we should be able to write 1/8 total fs size"
+    size = bf.dev.stat().st_size // 8
+    print("Writing file of size {}".format(size))
+
+    lf = bf.mnt / 'largefile'
+    lf.write_bytes(util.random_bytes(size))
+
+    print("Done.")
+
+    bf.unmount()
+    bf.verify()

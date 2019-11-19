@@ -74,16 +74,20 @@ def sparse_file(lpath, size):
 
     return path
 
-def device_1g(tmpdir):
-    """Default 1g sparse file for use with bcachefs."""
-    path = tmpdir / 'dev-1g'
-    return sparse_file(path, 1024**3)
+def device(tmpdir, name, size):
+    """Create a sparse file for use with bcachefs format."""
+    path = Path(tmpdir) / name
+    return sparse_file(path, size)
+
+def format_dev(tmpdir, name, size):
+    """Format a default filesystem on specified device."""
+    dev = device(tmpdir, name, size)
+    run_bch('format', dev, check=True)
+    return dev
 
 def format_1g(tmpdir):
     """Format a default filesystem on a 1g device."""
-    dev = device_1g(tmpdir)
-    run_bch('format', dev, check=True)
-    return dev
+    return format_dev(tmpdir, 'dev-1g', 1024**3)
 
 def mountpoint(tmpdir):
     """Construct a mountpoint "mnt" for tests."""

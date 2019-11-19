@@ -17,8 +17,8 @@ def test_sparse_file(tmpdir):
     dev = util.sparse_file(tmpdir / '1k', 1024)
     assert dev.stat().st_size == 1024
 
-def test_device_1g(tmpdir):
-    dev = util.device_1g(tmpdir)
+def test_device(tmpdir):
+    dev = util.device(tmpdir, 'dev', 1024**3)
     assert dev.stat().st_size == 1024**3
 
 def test_abort():
