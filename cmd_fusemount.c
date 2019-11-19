@@ -292,7 +292,16 @@ static void bcachefs_fuse_unlink(fuse_req_t req, fuse_ino_t dir,
 	ret = bch2_trans_do(c, NULL, BTREE_INSERT_ATOMIC|BTREE_INSERT_NOFAIL,
 			    bch2_unlink_trans(&trans, dir, &dir_u,
 					      &inode_u, &qstr));
+	if (ret)
+		goto err;
 
+	/* XXX implement fuse forget command to support unlink while open */
+	if (!inode_u.bi_nlink) {
+		int ignore = bch2_inode_rm(c, inode_u.bi_inum);
+		(void)ignore;
+	}
+
+err:
 	fuse_reply_err(req, -ret);
 }
 

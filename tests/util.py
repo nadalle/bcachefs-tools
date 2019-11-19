@@ -2,6 +2,7 @@
 
 import os
 import pytest
+import random
 import re
 import subprocess
 import sys
@@ -229,3 +230,7 @@ class BFuse:
 def have_fuse():
     res = run(BCH_PATH, 'fusemount', valgrind=False)
     return "Please supply a mountpoint." in res.stdout
+
+def random_bytes(size):
+    """Construct a bytearray full of random data."""
+    return bytearray(random.getrandbits(8) for _ in range(size))

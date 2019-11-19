@@ -105,6 +105,32 @@ def test_unlink(bfuse):
     bfuse.unmount()
     bfuse.verify()
 
+def test_unlink_deletes(bfuse):
+    bfuse.mount()
+
+    stv_pre = os.statvfs(bfuse.mnt)
+    path = bfuse.mnt / "largefile"
+
+    size = 10 * 1024**2
+    path.write_bytes(util.random_bytes(size))
+
+    stv_write = os.statvfs(bfuse.mnt)
+    lost_blocks = stv_pre.f_bfree - stv_write.f_bfree
+    lost_bytes = lost_blocks * stv_pre.f_bsize
+
+    assert lost_bytes >= size
+
+    path.unlink()
+
+    stv_unlink = os.statvfs(bfuse.mnt)
+    gained_blocks = stv_unlink.f_bfree - stv_write.f_bfree
+    gained_bytes = gained_blocks * stv_pre.f_bsize
+
+    assert gained_bytes >= size
+
+    bfuse.unmount()
+    bfuse.verify()
+
 def test_rmdir(bfuse):
     bfuse.mount()
 
