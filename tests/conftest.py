@@ -12,8 +12,7 @@ def fuse_fixture(tmpdir, size):
 
     yield bf
 
-    if bf.returncode is None:
-        bf.unmount(timeout=5.0)
+    bf.unmount(timeout=5.0)
 
 @pytest.fixture
 def bfuse(tmpdir):
