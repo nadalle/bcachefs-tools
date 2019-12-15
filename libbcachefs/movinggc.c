@@ -107,12 +107,27 @@ static bool have_copygc_reserve(struct bch_dev *ca)
 {
 	bool ret;
 
+	// XXX c or ca lock?!
 	spin_lock(&ca->freelist_lock);
 	ret = fifo_full(&ca->free[RESERVE_MOVINGGC]) ||
 		ca->allocator_state != ALLOCATOR_RUNNING;
 	spin_unlock(&ca->freelist_lock);
 
 	return ret;
+}
+
+static bool need_more_reserve(struct bch_fs *c, struct bch_dev *ca)
+{
+	size_t need = 0;
+	size_t i;
+
+	spin_lock(&c->freelist_lock);
+	for (i = RESERVE_BTREE; i < RESERVE_NR; ++i)
+		need += fifo_free(&ca->free[i]);
+	spin_unlock(&c->freelist_lock);
+
+	// Locking nonsense.
+	return need > (size_t)dev_buckets_available(c, ca);
 }
 
 static void bch2_copygc(struct bch_fs *c, struct bch_dev *ca)
@@ -210,16 +225,118 @@ static void bch2_copygc(struct bch_fs *c, struct bch_dev *ca)
 	trace_copygc(ca,
 		     atomic64_read(&move_stats.sectors_moved), sectors_not_moved,
 		     buckets_to_move, buckets_not_moved);
+
+	// hack
+	if (have_copygc_reserve(ca) && need_more_reserve(c, ca))
+		bch2_dev_copygc_kick(ca);
+}
+
+/**
+ * Determine the next copygc io clock wakeup point, or 0 if we should run now.
+ */
+static u64 copygc_next_io_clock(struct bch_fs *c, struct bch_dev *ca,
+				struct io_clock *clock)
+{
+	struct bch_dev_usage usage;
+	unsigned long last;
+	u64 available, fragmented, reserve;
+	u64 next = 0;
+
+	last = atomic_long_read(&clock->now);
+	reserve = ca->copygc_threshold;
+	usage = bch2_dev_usage_read(c, ca);
+	available = __dev_buckets_available(ca, usage) * ca->mi.bucket_size;
+	fragmented = usage.sectors_fragmented;
+
+	/* Prefer to wakeup once the non-reserve buckets are exhausted. */
+	if (available > reserve)
+		next = last + available - reserve;
+	else if (fragmented < reserve) {
+		/*
+		 * Previous comment (XXX half?):
+		 *
+		 * don't start copygc until there's more than half the copygc
+		 * reserve of fragmented space:
+		 */
+		next = last + reserve - fragmented;
+	}
+
+	return next;
+}
+
+void bch2_dev_copygc_kick(struct bch_dev *ca)
+{
+	if (likely(ca->copygc_thread)) {
+		atomic_inc(&ca->copygc_kicked);
+		wake_up_process(ca->copygc_thread);
+	}
+}
+
+/**
+ * Wakup the copygc if the current device usage warrants it. Otherwise, rearm
+ * the timer with a new target.
+ */
+static void copygc_io_timer_fn(struct io_timer *timer)
+{
+	struct bch_dev *ca = container_of(timer, struct bch_dev, copygc_timer);
+	struct bch_fs *c = ca->fs;
+	struct io_clock *clock = &c->io_clock[WRITE];
+	u64 rearm;
+
+	rearm = copygc_next_io_clock(c, ca, clock);
+
+	if (rearm) {
+		timer->expire = rearm;
+		bch2_io_timer_add(clock, timer);
+	} else {
+		bch2_dev_copygc_kick(ca);
+	}
+}
+
+
+/**
+ * Put copygc thread to sleep waiting for more work.
+ */
+static void wait_for_work(struct bch_fs *c, struct bch_dev *ca)
+{
+	struct io_clock *clock = &c->io_clock[WRITE];
+	struct io_timer *timer = &ca->copygc_timer;
+	u64 arm;
+
+	/* Is there more work right now? */
+	arm = copygc_next_io_clock(c, ca, clock);
+	if (!arm)
+		return;
+
+	/* Wait for work. */
+	timer->expire = arm;
+	bch2_io_timer_add(clock, timer);
+
+	while (1) {
+		set_current_state(TASK_INTERRUPTIBLE);
+		if (kthread_should_stop())
+			break;
+
+		if (atomic_read(&ca->copygc_kicked))
+			break;
+
+		schedule();
+		try_to_freeze();
+	}
+	__set_current_state(TASK_RUNNING);
+	bch2_io_timer_del(clock, timer);
+	atomic_set(&ca->copygc_kicked, 0);
 }
 
 static int bch2_copygc_thread(void *arg)
 {
 	struct bch_dev *ca = arg;
 	struct bch_fs *c = ca->fs;
+	struct io_timer *timer = &ca->copygc_timer;
 	struct io_clock *clock = &c->io_clock[WRITE];
-	struct bch_dev_usage usage;
-	unsigned long last;
-	u64 available, fragmented, reserve, next;
+
+	timer->fn = copygc_io_timer_fn;
+	timer->expire = 0;
 
 	set_freezable();
 
@@ -227,35 +344,13 @@ static int bch2_copygc_thread(void *arg)
 		if (kthread_wait_freezable(c->copy_gc_enabled))
 			break;
 
-		last = atomic_long_read(&clock->now);
-
-		reserve = ca->copygc_threshold;
-
-		usage = bch2_dev_usage_read(c, ca);
-
-		available = __dev_buckets_available(ca, usage) *
-			ca->mi.bucket_size;
-		if (available > reserve) {
-			next = last + available - reserve;
-			bch2_kthread_io_clock_wait(clock, next,
-					MAX_SCHEDULE_TIMEOUT);
-			continue;
-		}
-
-		/*
-		 * don't start copygc until there's more than half the copygc
-		 * reserve of fragmented space:
-		 */
-		fragmented = usage.sectors_fragmented;
-		if (fragmented < reserve) {
-			next = last + reserve - fragmented;
-			bch2_kthread_io_clock_wait(clock, next,
-					MAX_SCHEDULE_TIMEOUT);
-			continue;
-		}
-
+		// XXX maybe don't run first time?
 		bch2_copygc(c, ca);
+		wait_for_work(c, ca);
 	}
+
+	// XXX timer_del is racey
+	bch2_io_timer_del(clock, timer);
 
 	return 0;
 }
@@ -302,4 +397,5 @@ void bch2_dev_copygc_init(struct bch_dev *ca)
 {
 	bch2_pd_controller_init(&ca->copygc_pd);
 	ca->copygc_pd.d_term = 0;
+	atomic_set(&ca->copygc_kicked, 0);
 }

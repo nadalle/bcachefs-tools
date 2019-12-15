@@ -12,6 +12,7 @@
 #include "debug.h"
 #include "ec.h"
 #include "error.h"
+#include "movinggc.h"
 #include "recovery.h"
 
 #include <linux/kthread.h>
@@ -538,6 +539,12 @@ static int wait_buckets_available(struct bch_fs *c, struct bch_dev *ca)
 			       ca->inc_gen_really_needs_gc) >=
 		    (ssize_t) fifo_free(&ca->free_inc))
 			break;
+
+		if (fifo_empty(&ca->free[RESERVE_NONE])) {
+			if (dev_buckets_available(c, ca) > 0)
+				break;
+			bch2_dev_copygc_kick(ca);
+		}
 
 		up_read(&c->gc_lock);
 		schedule();
