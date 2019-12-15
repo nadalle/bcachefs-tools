@@ -305,6 +305,9 @@ def test_fill_4k_files(bfuse_16m):
     size = bf.dev.stat().st_size // 8
     print("Writing file of size {}".format(size))
 
+    #import time
+    #time.sleep(30)
+
     lf = bf.mnt / 'largefile'
     lf.write_bytes(util.random_bytes(size))
 

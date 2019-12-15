@@ -14,6 +14,13 @@ def fuse_fixture(tmpdir, size):
 
     bf.unmount(timeout=5.0)
 
+    print("bcachefs fusemount exited with error code {}".format(bf.returncode))
+    print("-- bcachefs stdout --")
+    print(bf.stdout)
+    print("-- bcachefs stderr --")
+    print(bf.stderr)
+    print("---------------------")
+
 @pytest.fixture
 def bfuse(tmpdir):
     '''A test requesting a "bfuse" is given one via this fixture.'''
