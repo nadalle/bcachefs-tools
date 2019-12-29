@@ -4,6 +4,7 @@ language: c
 arch:
   - amd64
   - arm64
+  - ppc64le
 
 addons:
   apt:
@@ -26,15 +27,20 @@ addons:
       - zlib1g-dev
 
 before_install:
-- wget https://github.com/libfuse/libfuse/archive/fuse-3.7.0.tar.gz -O /tmp/fuse.tar.gz
-- tar -C /tmp -zxvf /tmp/fuse.tar.gz
-- mkdir /tmp/libfuse-fuse-3.7.0/build
-- pushd /tmp/libfuse-fuse-3.7.0/build && meson .. && ninja && sudo ninja install && popd
-- sudo ldconfig
-
+  - wget https://github.com/libfuse/libfuse/archive/fuse-3.7.0.tar.gz -O /tmp/fuse.tar.gz
+  - tar -C /tmp -zxvf /tmp/fuse.tar.gz
+  - mkdir /tmp/libfuse-fuse-3.7.0/build
+  - pushd /tmp/libfuse-fuse-3.7.0/build && meson .. && ninja && sudo ninja install && popd
+  - sudo ldconfig
+  - ulimit -a
+  - env
+  - df -h
+  - free
+  - sysctl kernel.threads-max
+  
 before_script:
-- ulimit -c unlimited -S
-- sudo sysctl -w kernel.core_pattern="/tmp/core.%p"
+  - ulimit -c unlimited -S
+  - sudo sysctl -w kernel.core_pattern="/tmp/core.%p"
 
 script: ./smoke_test
 
