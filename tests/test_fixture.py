@@ -3,6 +3,7 @@
 # Tests of the functions in util.py
 
 import pytest
+import resource
 import signal
 import subprocess
 import time
@@ -22,10 +23,12 @@ def test_device_1g(tmpdir):
     assert dev.stat().st_size == 1024**3
 
 def test_abort():
+    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     ret = util.run(helper, 'abort')
     assert ret.returncode == -signal.SIGABRT
 
 def test_segfault():
+    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     ret = util.run(helper, 'segfault')
     assert ret.returncode == -signal.SIGSEGV
 
