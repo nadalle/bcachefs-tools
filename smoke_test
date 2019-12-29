@@ -44,7 +44,7 @@ function test() {
     echo Running tests.
     (
         cd tests
-        pytest-3 -n${JOBS}
+        pytest-3 -x -n${JOBS}
     ) > ${spam} 2>&1
 }
 
@@ -53,7 +53,7 @@ function test_vg() {
     (
         export BCACHEFS_TEST_USE_VALGRIND=yes
         cd tests
-        pytest-3 -n${JOBS}
+        pytest-3 -x -n${JOBS}
     ) > ${spam} 2>&1
 }
 
