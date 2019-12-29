@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <ctype.h>
 #include <errno.h>
+#include <execinfo.h>
 #include <fcntl.h>
 #include <limits.h>
 #include <linux/fs.h>
@@ -22,6 +23,14 @@
 #include "tools-util.h"
 #include "libbcachefs/util.h"
 
+static void
+stack_dump(void)
+{
+	void *stack[20];
+	int size = backtrace(stack, 20);
+	backtrace_symbols_fd(stack, size, 2);
+}
+
 void die(const char *fmt, ...)
 {
 	va_list args;
@@ -30,6 +39,8 @@ void die(const char *fmt, ...)
 	vfprintf(stderr, fmt, args);
 	va_end(args);
 	fputc('\n', stderr);
+
+	stack_dump();
 
 	_exit(EXIT_FAILURE);
 }
