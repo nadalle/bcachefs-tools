@@ -75,13 +75,21 @@ struct task_struct *kthread_create(int (*thread_fn)(void *data),
 	init_completion(&p->exited);
 
 	pthread_attr_t attr;
-	pthread_attr_init(&attr);
-	pthread_attr_setstacksize(&attr, 32 << 10);
+	ret = pthread_attr_init(&attr);
+	if (ret)
+		die("pthread_attr_init error %s", strerror(ret));
+
+	ret = pthread_attr_setstacksize(&attr, max(PTHREAD_STACK_MIN, 32 << 10));
+	if (ret)
+		die("pthread_attr_setstacksize error %s", strerror(ret));
 
 	ret = pthread_create(&p->thread, &attr, kthread_start_fn, p);
 	if (ret)
 		die("pthread_create error %s", strerror(ret));
+
 	pthread_setname_np(p->thread, p->comm);
+
+
 	return p;
 }
 

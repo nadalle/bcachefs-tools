@@ -14,7 +14,7 @@ def test_help():
 
 def test_format(tmpdir):
     dev = util.device_1g(tmpdir)
-    ret = util.run_bch('format', dev, valgrind=True)
+    ret = util.run_bch('format', dev, '--block_size', "4096", valgrind=True)
 
     assert ret.returncode == 0
     assert len(ret.stdout) > 0

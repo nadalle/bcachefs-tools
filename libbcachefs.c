@@ -171,8 +171,8 @@ struct bch_sb *bch2_format(struct bch_opt_strs	fs_opt_strs,
 	if (!opt_defined(fs_opts, block_size)) {
 		opt_set(fs_opts, block_size, max_dev_block_size);
 	} else if (fs_opts.block_size < max_dev_block_size)
-		die("blocksize too small: %u, must be greater than device blocksize %u",
-		    fs_opts.block_size, max_dev_block_size);
+		;/*die("blocksize too small: %u, must be greater than device blocksize %u",
+		   fs_opts.block_size, max_dev_block_size);*/
 
 	/* calculate bucket sizes: */
 	for (i = devs; i < devs + nr_devs; i++)
@@ -959,6 +959,10 @@ int bchu_data(struct bchfs_handle fs, struct bch_ioctl_data cmd)
 
 /* option parsing */
 
+void **garbage = NULL;
+unsigned garbage_size = 0;
+
+
 struct bch_opt_strs bch2_cmdline_opts_get(int *argc, char *argv[],
 					  unsigned opt_types)
 {
@@ -977,7 +981,13 @@ struct bch_opt_strs bch2_cmdline_opts_get(int *argc, char *argv[],
 			continue;
 		}
 
+
+		if (!garbage)
+			garbage = calloc(100, sizeof *garbage);
+
 		optstr = strdup(optstr);
+
+		garbage[garbage_size++] = optstr;
 
 		p = optstr;
 		while (isalpha(*p) || *p == '_')

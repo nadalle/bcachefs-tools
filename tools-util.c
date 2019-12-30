@@ -23,6 +23,7 @@
 #include "tools-util.h"
 #include "libbcachefs/util.h"
 
+#if 0
 static void
 stack_dump(void)
 {
@@ -30,6 +31,7 @@ stack_dump(void)
 	int size = backtrace(stack, 20);
 	backtrace_symbols_fd(stack, size, 2);
 }
+#endif
 
 void die(const char *fmt, ...)
 {
@@ -40,7 +42,7 @@ void die(const char *fmt, ...)
 	va_end(args);
 	fputc('\n', stderr);
 
-	stack_dump();
+	//stack_dump();
 
 	_exit(EXIT_FAILURE);
 }

@@ -85,7 +85,7 @@ def device_1g(tmpdir):
 def format_1g(tmpdir):
     """Format a default filesystem on a 1g device."""
     dev = device_1g(tmpdir)
-    run_bch('format', dev, check=True)
+    run_bch('format', dev, '--block_size', "4096", check=True)
     return dev
 
 def mountpoint(tmpdir):
