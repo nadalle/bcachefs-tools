@@ -86,7 +86,7 @@ def test_mkdir(bfuse):
     bfuse.unmount()
     bfuse.verify()
 
-def test_unlink(bfuse):
+def test_unlink_metadata(bfuse):
     bfuse.mount()
 
     path = bfuse.mnt / "file"
@@ -105,7 +105,7 @@ def test_unlink(bfuse):
     bfuse.unmount()
     bfuse.verify()
 
-def test_rmdir(bfuse):
+def test_rmdir_metadata(bfuse):
     bfuse.mount()
 
     path = bfuse.mnt / "dir"
@@ -230,6 +230,34 @@ def test_write(bfuse):
     assert ts.contains(post_st.st_mtime)
 
     assert path.read_bytes() == b'test'
+
+    bfuse.unmount()
+    bfuse.verify()
+
+def test_unlink_data(bfuse):
+    bfuse.mount()
+
+    path = bfuse.mnt / "file"
+
+    SIZE = 1024**2 * 50
+
+    def free_bytes(stv):
+        return stv.f_bfree * stv.f_frsize
+
+    stv_pre_write = os.statvfs(bfuse.mnt)
+
+    path.write_bytes(b'*' * 1024**2 * 50)
+
+    stv_post_write = os.statvfs(bfuse.mnt)
+
+    assert free_bytes(stv_pre_write) - free_bytes(stv_post_write) >= SIZE
+
+    path.unlink()
+
+    stv_post_unlink = os.statvfs(bfuse.mnt)
+
+    # Possibly need this to be approximate.
+    assert free_bytes(stv_pre_write) - free_bytes(stv_post_write) == 0
 
     bfuse.unmount()
     bfuse.verify()
