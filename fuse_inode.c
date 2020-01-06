@@ -28,14 +28,19 @@ void bf_inode_init(void)
 		die("rhashtable_init err %m");
 }
 
+static void
+free_fn(void *ptr, void *arg)
+{
+	free(ptr);
+}
+
 /*
  * Free the inode cache, unreffing and calling unref_fn on all remaining
  * entries in the cache.
  */
 void bf_inode_destroy(void)
 {
-	// XXX destroy each entry, missing free-and-destroy fn.
-	rhashtable_destroy(&table);
+	rhashtable_free_and_destroy(&table, free_fn, NULL);
 }
 
 static struct bf_inode *__bf_inode_get(uint64_t ino)
