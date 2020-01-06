@@ -511,6 +511,60 @@ int rhashtable_init(struct rhashtable *ht,
 	return 0;
 }
 
+/**
+ * rhashtable_free_and_destroy - free elements and destroy hash table
+ * @ht:		the hash table to destroy
+ * @free_fn:	callback to release resources of element
+ * @arg:	pointer passed to free_fn
+ *
+ * Stops an eventual async resize. If defined, invokes free_fn for each
+ * element to releasal resources. Please note that RCU protected
+ * readers may still be accessing the elements. Releasing of resources
+ * must occur in a compatible manner. Then frees the bucket array.
+ *
+ * This function will eventually sleep to wait for an async resize
+ * to complete. The caller is responsible that no further write operations
+ * occurs in parallel.
+ */
+void rhashtable_free_and_destroy(struct rhashtable *ht,
+				 void (*free_fn)(void *ptr, void *arg),
+				 void *arg)
+{
+	struct bucket_table *tbl, *next_tbl;
+	unsigned int i;
+
+	cancel_work_sync(&ht->run_work);
+
+	mutex_lock(&ht->mutex);
+	tbl = rht_dereference(ht->tbl, ht);
+restart:
+	if (free_fn) {
+		for (i = 0; i < tbl->size; i++) {
+			struct rhash_head *pos, *next;
+
+			cond_resched();
+
+			for (pos = rcu_dereference(tbl->buckets[i]),
+			     next = !rht_is_a_nulls(pos) ?
+				     rht_dereference(pos->next, ht) : NULL;
+			     !rht_is_a_nulls(pos);
+			     pos = next,
+			     next = !rht_is_a_nulls(pos) ?
+				     rht_dereference(pos->next, ht) : NULL)
+
+				free_fn(rht_obj(ht, pos), arg);
+		}
+	}
+
+	next_tbl = rht_dereference(tbl->future_tbl, ht);
+	bucket_table_free(tbl);
+	if (next_tbl) {
+		tbl = next_tbl;
+		goto restart;
+	}
+	mutex_unlock(&ht->mutex);
+}
+
 void rhashtable_destroy(struct rhashtable *ht)
 {
 	struct bucket_table *tbl;

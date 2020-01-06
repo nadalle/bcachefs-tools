@@ -208,6 +208,10 @@ struct bucket_table *rhashtable_insert_slow(struct rhashtable *,
 					    struct bucket_table *);
 
 int rhashtable_init(struct rhashtable *, const struct rhashtable_params *);
+
+void rhashtable_free_and_destroy(struct rhashtable *ht,
+				 void (*free_fn)(void *ptr, void *arg),
+				 void *arg);
 void rhashtable_destroy(struct rhashtable *);
 
 #define rht_dereference(p, ht)			rcu_dereference(p)
