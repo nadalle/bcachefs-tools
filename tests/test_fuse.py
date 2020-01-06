@@ -4,6 +4,7 @@
 
 import pytest
 import os
+import time
 import util
 
 pytestmark = pytest.mark.skipif(
@@ -254,10 +255,97 @@ def test_unlink_data(bfuse):
 
     path.unlink()
 
+    # wait for the possibly asynchronous unlink to happen.
+    while os.statvfs(bfuse.mnt).f_files != stv_pre_write.f_files:
+        time.sleep(0.5)
+
     stv_post_unlink = os.statvfs(bfuse.mnt)
 
-    # Possibly need this to be approximate.
-    assert free_bytes(stv_pre_write) - free_bytes(stv_post_write) == 0
+    assert free_bytes(stv_pre_write) - free_bytes(stv_post_unlink) == \
+        pytest.approx(128*1024)
+
+    bfuse.unmount()
+    bfuse.verify()
+
+def test_unlink_inode_count(bfuse):
+    bfuse.mount()
+
+    path1 = bfuse.mnt / "file"
+    path2 = bfuse.mnt / "dir"
+    path3 = bfuse.mnt / "symlink"
+    path4 = bfuse.mnt / "node"
+
+    stv_pre_write = os.statvfs(bfuse.mnt)
+
+    path1.touch()
+    path2.mkdir()
+    path3.symlink_to(path1)
+    os.mkfifo(path4)
+
+    stv_post_write = os.statvfs(bfuse.mnt)
+
+    assert stv_post_write.f_files - stv_pre_write.f_files == 4
+
+    path1.unlink()
+    path2.rmdir()
+    path3.unlink()
+    path4.unlink()
+
+    # The actual inode deletes are somewhat asynchronous
+    while os.statvfs(bfuse.mnt).f_files != stv_pre_write.f_files:
+        time.sleep(0.5)
+
+    bfuse.unmount()
+    bfuse.verify()
+
+def test_unlink_open_file(bfuse):
+    bfuse.mount()
+
+    path = bfuse.mnt / "file"
+    SIZE = 1024**2 * 10
+
+    def free_bytes(stv):
+        return stv.f_bfree * stv.f_frsize
+
+    stv_pre_open = os.statvfs(bfuse.mnt)
+    with open(path, "wb+") as f:
+        stv_pre_write = os.statvfs(bfuse.mnt)
+
+        f.write(b'*' * SIZE)
+        f.flush()
+        os.fsync(f.fileno())
+
+        stv_post_write1 = os.statvfs(bfuse.mnt)
+        assert free_bytes(stv_pre_write) - free_bytes(stv_post_write1) >= SIZE
+
+        path.unlink()
+
+        stv_post_unlink = os.statvfs(bfuse.mnt)
+        assert free_bytes(stv_post_unlink) == free_bytes(stv_post_write1)
+        assert stv_post_write1.f_files == stv_post_unlink.f_files
+
+        # Verify we can still write
+        f.write(b'+' * SIZE)
+        f.flush()
+        os.fsync(f.fileno())
+
+        stv_post_write2 = os.statvfs(bfuse.mnt)
+        assert free_bytes(stv_pre_write) - free_bytes(stv_post_write2) >= 2*SIZE
+
+        # Verify correctness of data
+        f.seek(0);
+        data = f.read()
+        assert(data[0:SIZE] == b'*' * SIZE)
+        assert(data[SIZE:]  == b'+' * SIZE)
+
+    # It should be deleted soon, but since it's asynchronous we have to poll
+    while os.statvfs(bfuse.mnt).f_files != stv_pre_open.f_files:
+        time.sleep(0.5)
+
+    stv_post_close = os.statvfs(bfuse.mnt)
+    assert stv_pre_open.f_files == stv_post_close.f_files
+    assert free_bytes(stv_pre_open) - free_bytes(stv_post_close) == \
+        pytest.approx(128*1024)
 
     bfuse.unmount()
     bfuse.verify()

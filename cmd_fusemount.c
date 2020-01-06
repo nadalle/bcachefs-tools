@@ -11,6 +11,7 @@
 #include "cmds.h"
 #include "libbcachefs.h"
 #include "tools-util.h"
+#include "fuse_inode.h"
 
 #include "libbcachefs/bcachefs.h"
 #include "libbcachefs/alloc_foreground.h"
@@ -82,12 +83,15 @@ static void bcachefs_fuse_init(void *arg, struct fuse_conn_info *conn)
 		fuse_log(FUSE_LOG_DEBUG, "fuse_init: writeback not capable\n");
 
 	//conn->want |= FUSE_CAP_POSIX_ACL;
+
+	bf_inode_init();
 }
 
 static void bcachefs_fuse_destroy(void *arg)
 {
 	struct bch_fs *c = arg;
 
+	bf_inode_destroy();
 	bch2_fs_stop(c);
 }
 
@@ -129,6 +133,10 @@ static void bcachefs_fuse_lookup(fuse_req_t req, fuse_ino_t dir,
 
 	fuse_log(FUSE_LOG_DEBUG, "fuse_lookup ret(inum=%llu)\n",
 		 bi.bi_inum);
+
+	struct bf_inode *bfi = bf_inode_get_ref(bi.bi_inum);
+	if (IS_ERR(bfi))
+		die("bf_inode_get_ref error %s", strerror(-PTR_ERR(bfi)));
 
 	struct fuse_entry_param e = inode_to_entry(c, &bi);
 	fuse_reply_entry(req, &e);
@@ -257,6 +265,10 @@ static void bcachefs_fuse_mknod(fuse_req_t req, fuse_ino_t dir,
 	if (ret)
 		goto err;
 
+	struct bf_inode *bfi = bf_inode_get_ref(new_inode.bi_inum);
+	if (IS_ERR(bfi))
+		die("bf_inode_get_ref error %s", strerror(-PTR_ERR(bfi)));
+
 	struct fuse_entry_param e = inode_to_entry(c, &new_inode);
 	fuse_reply_entry(req, &e);
 	return;
@@ -291,7 +303,23 @@ static void bcachefs_fuse_unlink(fuse_req_t req, fuse_ino_t dir,
 	ret = bch2_trans_do(c, NULL, NULL, BTREE_INSERT_NOFAIL,
 			    bch2_unlink_trans(&trans, dir, &dir_u,
 					      &inode_u, &qstr));
+	if (ret)
+		goto err;
 
+	/*
+	 * If this is the last link, the file needs to be deleted, but only
+	 * after the last reference goes away.  This will happen in
+	 * fuse_forget()
+	 */
+	if (!inode_u.bi_nlink) {
+		bool delete = bf_inode_unlink(inode_u.bi_inum);
+		fuse_log(FUSE_LOG_DEBUG, "bf_inode_unlink -> %d\n", delete);
+		if (delete) {
+			int ignore = bch2_inode_rm(c, inode_u.bi_inum);
+			(void)ignore;
+		}
+	}
+err:
 	fuse_reply_err(req, -ret);
 }
 
@@ -354,6 +382,10 @@ static void bcachefs_fuse_link(fuse_req_t req, fuse_ino_t inum,
 					    inum, &dir_u, &inode_u, &qstr));
 
 	if (!ret) {
+		struct bf_inode *bfi = bf_inode_get_ref(inode_u.bi_inum);
+		if (IS_ERR(bfi))
+			die("bf_inode_get_ref err %s", strerror(-PTR_ERR(bfi)));
+
 		struct fuse_entry_param e = inode_to_entry(c, &inode_u);
 		fuse_reply_entry(req, &e);
 	} else {
@@ -732,6 +764,10 @@ static void bcachefs_fuse_symlink(fuse_req_t req, const char *link,
 
 	new_inode.bi_size = written;
 
+	struct bf_inode *bfi = bf_inode_get_ref(new_inode.bi_inum);
+	if (IS_ERR(bfi))
+		die("bf_inode_get_ref error %s", strerror(-PTR_ERR(bfi)));
+
 	struct fuse_entry_param e = inode_to_entry(c, &new_inode);
 	fuse_reply_entry(req, &e);
 	return;
@@ -1026,6 +1062,11 @@ static void bcachefs_fuse_create(fuse_req_t req, fuse_ino_t dir,
 	if (ret)
 		goto err;
 
+	struct bf_inode *bfi = bf_inode_get_ref(new_inode.bi_inum);
+	if (IS_ERR(bfi))
+		die("bf_inode_get_ref error %s", strerror(-PTR_ERR(bfi)));
+	fi->fh = (uintptr_t)bfi;
+
 	struct fuse_entry_param e = inode_to_entry(c, &new_inode);
 	fuse_reply_create(req, &e, fi);
 	return;
@@ -1050,24 +1091,45 @@ static void bcachefs_fuse_fallocate(fuse_req_t req, fuse_ino_t inum, int mode,
 }
 #endif
 
+static void bcachefs_fuse_forget(fuse_req_t req, fuse_ino_t ino,
+				 uint64_t nlookup)
+{
+	struct bch_fs *c = fuse_req_userdata(req);
+
+	fuse_log(FUSE_LOG_DEBUG, "fuse_forget(ino=%llu, nlookup=%llu)\n",
+		 ino, nlookup);
+
+	ino = map_root_ino(ino);
+
+	bool delete = bf_inode_put(ino, nlookup);
+	fuse_log(FUSE_LOG_DEBUG, "fuse_forget delete=%d\n", delete);
+	if (delete) {
+		int ignore = bch2_inode_rm(c, ino);
+		(void)ignore;
+	}
+
+	fuse_reply_none(req);
+}
+
 static const struct fuse_lowlevel_ops bcachefs_fuse_ops = {
 	.init		= bcachefs_fuse_init,
 	.destroy	= bcachefs_fuse_destroy,
-	.lookup		= bcachefs_fuse_lookup,
+	.lookup	= bcachefs_fuse_lookup,
 	.getattr	= bcachefs_fuse_getattr,
 	.setattr	= bcachefs_fuse_setattr,
 	.readlink	= bcachefs_fuse_readlink,
 	.mknod		= bcachefs_fuse_mknod,
 	.mkdir		= bcachefs_fuse_mkdir,
-	.unlink		= bcachefs_fuse_unlink,
+	.unlink	= bcachefs_fuse_unlink,
 	.rmdir		= bcachefs_fuse_rmdir,
 	.symlink	= bcachefs_fuse_symlink,
-	.rename		= bcachefs_fuse_rename,
+	.rename	= bcachefs_fuse_rename,
 	.link		= bcachefs_fuse_link,
 	.open		= bcachefs_fuse_open,
 	.read		= bcachefs_fuse_read,
 	.write		= bcachefs_fuse_write,
 	//.flush	= bcachefs_fuse_flush,
+	.forget	= bcachefs_fuse_forget,
 	//.release	= bcachefs_fuse_release,
 	//.fsync	= bcachefs_fuse_fsync,
 	//.opendir	= bcachefs_fuse_opendir,
@@ -1075,12 +1137,12 @@ static const struct fuse_lowlevel_ops bcachefs_fuse_ops = {
 	//.readdirplus	= bcachefs_fuse_readdirplus,
 	//.releasedir	= bcachefs_fuse_releasedir,
 	//.fsyncdir	= bcachefs_fuse_fsyncdir,
-	.statfs		= bcachefs_fuse_statfs,
+	.statfs	= bcachefs_fuse_statfs,
 	//.setxattr	= bcachefs_fuse_setxattr,
 	//.getxattr	= bcachefs_fuse_getxattr,
 	//.listxattr	= bcachefs_fuse_listxattr,
 	//.removexattr	= bcachefs_fuse_removexattr,
-	.create		= bcachefs_fuse_create,
+	.create	= bcachefs_fuse_create,
 
 	/* posix locks: */
 #if 0
