@@ -45,13 +45,14 @@ struct btree_trans;
 static inline unsigned
 __extent_entry_type(const union bch_extent_entry *e)
 {
-	return e->type ? __ffs(e->type) : BCH_EXTENT_ENTRY_MAX;
+	unsigned type = e->type & 0xFF;
+	return type ? __ffs(type) : BCH_EXTENT_ENTRY_MAX;
 }
 
 static inline enum bch_extent_entry_type
 extent_entry_type(const union bch_extent_entry *e)
 {
-	int ret = __ffs(e->type);
+	int ret = __ffs(e->type & 0xFF);
 
 	EBUG_ON(ret < 0 || ret >= BCH_EXTENT_ENTRY_MAX);
 
