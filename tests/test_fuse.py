@@ -235,7 +235,7 @@ def test_write(bfuse):
     bfuse.unmount()
     bfuse.verify()
 
-def test_unlink_data(bfuse):
+def test_unlink_data(bfuse, valgrind_broken):
     bfuse.mount()
 
     path = bfuse.mnt / "file"
@@ -298,7 +298,7 @@ def test_unlink_inode_count(bfuse):
     bfuse.unmount()
     bfuse.verify()
 
-def test_unlink_open_file(bfuse):
+def test_unlink_open_file(bfuse, valgrind_broken):
     bfuse.mount()
 
     path = bfuse.mnt / "file"

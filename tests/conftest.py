@@ -16,3 +16,9 @@ def bfuse(tmpdir):
     yield bf
 
     bf.unmount(timeout=5.0)
+
+@pytest.fixture
+def valgrind_broken():
+    '''A test which is broken with valgrind currently.'''
+
+    util.ENABLE_VALGRIND = False
